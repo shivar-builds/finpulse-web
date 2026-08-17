@@ -1,73 +1,99 @@
 name: GCS + Cloud CDN Multi-Environment Pipeline
 
 on:
-    push:
-        branches:
-            - develop
-            - qa
-            - "release/**"
-            - main
+  push:
+    branches:
+      - develop
+      - qa
+      - "release/**"
+      - main
 
 permissions:
-    id-token: write
-    contents: read
+  id-token: write
+  contents: read
 
 jobs:
-    deploy:
-        runs-on: ubuntu-latest
+  deploy:
+    runs-on: ubuntu-latest
 
-        steps:
-            - name: Checkout Repository
-              uses: actions/checkout@v4
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
 
-            - name: Setup Node.js
-              uses: actions/setup-node@v4
-              with:
-                  node-version: 20
-                  cache: "npm"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-            - name: Install Dependencies
-              run: npm ci
+      - name: Install Dependencies
+        run: npm ci
 
-            # Map branch to target environment, bucket, and backend bucket
-            - name: Resolve Environment Configuration
-              run: |
-                  if [ "${{ github.ref_name }}" = "main" ]; then
-                    echo "ENV_NAME=production" >> $GITHUB_ENV
-                    echo "BUCKET_NAME=finpulse-web-prod" >> $GITHUB_ENV
-                    echo "BACKEND_BUCKET=finpulse-backend-prod" >> $GITHUB_ENV
-                  elif [[ "${{ github.ref_name }}" == release/* ]]; then
-                    echo "ENV_NAME=staging" >> $GITHUB_ENV
-                    echo "BUCKET_NAME=finpulse-web-stage" >> $GITHUB_ENV
-                    echo "BACKEND_BUCKET=finpulse-backend-stage" >> $GITHUB_ENV
-                  elif [ "${{ github.ref_name }}" = "qa" ]; then
-                    echo "ENV_NAME=qa" >> $GITHUB_ENV
-                    echo "BUCKET_NAME=finpulse-web-qa" >> $GITHUB_ENV
-                    echo "BACKEND_BUCKET=finpulse-backend-qa" >> $GITHUB_ENV
-                  else
-                    echo "ENV_NAME=development" >> $GITHUB_ENV
-                    echo "BUCKET_NAME=finpulse-web-dev" >> $GITHUB_ENV
-                    echo "BACKEND_BUCKET=finpulse-backend-dev" >> $GITHUB_ENV
-                  fi
+      - name: Resolve Environment Configuration
+        shell: bash
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "ENV_NAME=production" >> "$GITHUB_ENV"
+            echo "BUCKET_NAME=finpulse-web-prod" >> "$GITHUB_ENV"
+            echo "URL_MAP_NAME=finpulse-prod-url-map" >> "$GITHUB_ENV"
 
-            - name: Build Application
-              run: npm run build -- --configuration=${{ env.ENV_NAME }}
+          elif [[ "${{ github.ref_name }}" == release/* ]]; then
+            echo "ENV_NAME=staging" >> "$GITHUB_ENV"
+            echo "BUCKET_NAME=finpulse-web-stage" >> "$GITHUB_ENV"
+            echo "URL_MAP_NAME=finpulse-stage-url-map" >> "$GITHUB_ENV"
 
-            - name: Authenticate to Google Cloud
-              uses: google-github-actions/auth@v2
-              with:
-                  workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-                  service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          elif [ "${{ github.ref_name }}" = "qa" ]; then
+            echo "ENV_NAME=qa" >> "$GITHUB_ENV"
+            echo "BUCKET_NAME=finpulse-web-qa" >> "$GITHUB_ENV"
+            echo "URL_MAP_NAME=finpulse-qa-url-map" >> "$GITHUB_ENV"
 
-            - name: Set up Cloud SDK
-              uses: google-github-actions/setup-gcloud@v2
+          elif [ "${{ github.ref_name }}" = "develop" ]; then
+            echo "ENV_NAME=development" >> "$GITHUB_ENV"
+            echo "BUCKET_NAME=finpulse-web-dev" >> "$GITHUB_ENV"
+            echo "URL_MAP_NAME=finpulse-dev-url-map" >> "$GITHUB_ENV"
 
-            # Sync static build output to the target GCS bucket
-            - name: Deploy Static Files to GCS Bucket
-              run: |
-                  gcloud storage rsync -r --delete-unmatched-destination-objects gs://${{ env.BUCKET_NAME }}
+          else
+            echo "Unsupported branch: ${{ github.ref_name }}"
+            exit 1
+          fi
 
-            # Invalidate Cloud CDN cache so users immediately get updated assets
-            - name: Invalidate CDN Cache
-              run: |
-                  gcloud storage rsync -r --delete-unmatched-destination-objects dist/finpulse-web/browser ${{ env.BACKEND_BUCKET }}
+      - name: Show Deployment Configuration
+        run: |
+          echo "Environment: ${{ env.ENV_NAME }}"
+          echo "Bucket: ${{ env.BUCKET_NAME }}"
+          echo "URL Map: ${{ env.URL_MAP_NAME }}"
+
+      - name: Build Application
+        run: npm run build -- --configuration="${{ env.ENV_NAME }}"
+
+      - name: Verify Build Output
+        run: |
+          echo "Build output:"
+          find dist -maxdepth 3 -type f | head -50
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy Static Files to GCS Bucket
+        run: |
+          gcloud storage rsync \
+            -r \
+            --delete-unmatched-destination-objects \
+            dist/finpulse-web/browser \
+            gs://${{ env.BUCKET_NAME }}
+
+      - name: Verify GCS Deployment
+        run: |
+          gcloud storage ls gs://${{ env.BUCKET_NAME }}/
+
+      - name: Invalidate CDN Cache
+        run: |
+          gcloud compute url-maps invalidate-cache \
+            "${{ env.URL_MAP_NAME }}" \
+            --path="/*"
