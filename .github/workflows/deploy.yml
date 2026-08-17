@@ -65,7 +65,7 @@ jobs:
             # Sync static build output to the target GCS bucket
             - name: Deploy Static Files to GCS Bucket
               run: |
-                  gcloud storage rsync -r --delete-unmatched-destination-objects gs://${{ env.BUCKET_NAME }}
+                  gcloud storage rsync -r --delete-unmatched-destination-objects dist/finpulse-web/browser gs://${{ env.BUCKET_NAME }}
 
             # Invalidate Cloud CDN cache so users immediately get updated assets
             - name: Invalidate CDN Cache
