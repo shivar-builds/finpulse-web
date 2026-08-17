@@ -56,8 +56,8 @@ jobs:
             - name: Authenticate to Google Cloud
               uses: google-github-actions/auth@v2
               with:
-                  workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-                  service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+                  workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+                  service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
             - name: Set up Cloud SDK
               uses: google-github-actions/setup-gcloud@v2
@@ -65,9 +65,9 @@ jobs:
             # Sync static build output to the target GCS bucket
             - name: Deploy Static Files to GCS Bucket
               run: |
-                  gcloud storage rsync -r --delete-unmatched-destination-objects dist/finpulse-web/browser gs://${{ env.BUCKET_NAME }}
+                  gcloud storage rsync -r --delete-unmatched-destination-objects gs://${{ env.BUCKET_NAME }}
 
             # Invalidate Cloud CDN cache so users immediately get updated assets
             - name: Invalidate CDN Cache
               run: |
-                  gcloud compute backend-buckets invalidate-cache ${{ env.BACKEND_BUCKET }} --path="/*"
+                  gcloud compute url-maps invalidate-cache ${{ env.BACKEND_BUCKET }} --path="/*"
