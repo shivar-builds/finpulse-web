@@ -70,4 +70,4 @@ jobs:
             # Invalidate Cloud CDN cache so users immediately get updated assets
             - name: Invalidate CDN Cache
               run: |
-                  gcloud compute url-maps invalidate-cache ${{ env.BACKEND_BUCKET }} --path="/*"
+                  gcloud storage rsync -r --delete-unmatched-destination-objects dist/finpulse-web/browser ${{ env.BACKEND_BUCKET }}
